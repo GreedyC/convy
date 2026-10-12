@@ -20,7 +20,7 @@ from convy.dialog import (
     Turn,
     Verdict,
 )
-from convy.report import Comparison, Index, Report, Run, Runs
+from convy.report import Comparison, Evidence, Index, Report, Run, Runs, Tally
 from convy.scenario import Outcome, Scenario
 
 DAY = datetime(2026, 10, 6, tzinfo=UTC)
@@ -464,22 +464,22 @@ def test_a_pass_rate_missing_on_one_side_has_no_change(tmp_path):
     assert (rate.value, rate.tone) == (None, "none")
 
 
-def test_a_change_of_pass_rate_is_noise_unless_the_paired_test_says_otherwise(tmp_path):
+def test_a_change_of_pass_rate_is_noise_unless_the_evidence_shows_it(tmp_path):
     journal(tmp_path, "bot", "1", 3, *[outcome(s, FAILED) for s in "abc"], started=at(4))
     journal(tmp_path, "bot", "1", 3, outcome("a", PASSED), outcome("b", FAILED),
             outcome("c", FAILED), started=at(5))  # fmt: skip
-    journal(tmp_path, "other", "1", 4, *[outcome(s, FAILED) for s in "abcd"], started=at(4))
-    journal(tmp_path, "other", "1", 4, *[outcome(s, PASSED) for s in "abcd"], started=at(5))
+    journal(tmp_path, "other", "1", 6, *[outcome(s, FAILED) for s in "abcdef"], started=at(4))
+    journal(tmp_path, "other", "1", 6, *[outcome(s, PASSED) for s in "abcdef"], started=at(5))
     runs = sorted(Runs(tmp_path), key=lambda run: (run.spec.agent, run.spec.started))
     noise = Comparison(runs[0], runs[1]).page().deltas.rate
     assert noise.tone == "noise"
     assert noise.value == pytest.approx(100 / 3)
     real = Comparison(runs[2], runs[3]).page().deltas.rate
-    assert (real.value, real.tone) == (100, "good")  # four scenarios, all from 0 to 1
+    assert (real.value, real.tone) == (100, "good")  # six scenarios, all from 0 to 1: 1 in 32
 
 
-def test_a_significant_change_that_disagrees_with_the_pass_rate_is_noise(tmp_path):
-    def attempts(scenario: str, verdict: Verdict, count: int) -> list[Outcome]:
+def test_a_real_change_colours_the_pass_rate_unless_they_disagree(tmp_path):
+    def attempts(scenario: str, verdict: Verdict | NoVerdict, count: int) -> list[Outcome]:
         return [outcome(scenario, verdict, attempt=n) for n in range(1, count + 1)]
 
     # a to e go from failing to passing; f, played k times, loses half its passes
@@ -489,16 +489,70 @@ def test_a_significant_change_that_disagrees_with_the_pass_rate_is_noise(tmp_pat
     journal(tmp_path, "bot", "1", 6, *[outcome(s, PASSED) for s in "abcde"],
             *attempts("f", PASSED, 10), *attempts("f", FAILED, k)[10:], k=k,
             started=at(5))  # fmt: skip
-    # the same, but f loses all its passes over five attempts: equal pass rates
-    journal(tmp_path, "other", "1", 6, *[outcome(s, FAILED) for s in "abcde"],
-            *attempts("f", PASSED, 5), k=5, started=at(4))  # fmt: skip
-    journal(tmp_path, "other", "1", 6, *[outcome(s, PASSED) for s in "abcde"],
-            *attempts("f", FAILED, 5), k=5, started=at(5))  # fmt: skip
+    # a falls from 20/20 to 12/20; b fails 20 times, then gets no verdict, so it leaves the rate
+    journal(tmp_path, "mixed", "1", 2, *attempts("a", PASSED, k), *attempts("b", FAILED, k),
+            k=k, started=at(4))  # fmt: skip
+    journal(tmp_path, "mixed", "1", 2, *attempts("a", PASSED, 12), *attempts("a", FAILED, k)[12:],
+            *attempts("b", NoVerdict("down"), k), k=k, started=at(5))  # fmt: skip
     runs = sorted(Runs(tmp_path), key=lambda run: (run.spec.agent, run.spec.started))
     down = Comparison(runs[0], runs[1]).page().deltas.rate
-    assert (down.value, down.tone) == (-20, "noise")
-    level = Comparison(runs[2], runs[3]).page().deltas.rate
-    assert (level.value, level.tone) == (0, "same")
+    assert (down.value, down.tone) == (-20, "noise")  # a to e got better, f worse: mixed
+    mixed = Comparison(runs[2], runs[3]).page().deltas.rate
+    assert (mixed.value, mixed.tone) == (10, "noise")  # the rate rises, the evidence says worse
+
+
+def test_a_real_fall_turns_the_pass_rate_red_and_unjudged_attempts_stay_out(tmp_path):
+    def attempts(scenario: str, verdict: Verdict | NoVerdict, count: int, start: int = 1):
+        return [outcome(scenario, verdict, attempt=n) for n in range(start, start + count)]
+
+    # three of six scenarios fall from 3/3 to 0/3: chance gives it about once in a thousand
+    journal(tmp_path, "bot", "1", 6, *[o for s in "abcdef" for o in attempts(s, PASSED, 3)],
+            k=3, started=at(4))  # fmt: skip
+    journal(tmp_path, "bot", "1", 6, *[o for s in "abc" for o in attempts(s, FAILED, 3)],
+            *[o for s in "def" for o in attempts(s, PASSED, 3)], k=3, started=at(5))  # fmt: skip
+    # a falls from 40/40 to 18 of 20 judged: the 20 attempts with no verdict are not failures
+    journal(tmp_path, "other", "1", 1, *attempts("a", PASSED, 40), k=40, started=at(4))
+    journal(tmp_path, "other", "1", 1, *attempts("a", PASSED, 18), *attempts("a", FAILED, 2, 19),
+            *attempts("a", NoVerdict("down"), 20, 21), k=40, started=at(5))  # fmt: skip
+    runs = sorted(Runs(tmp_path), key=lambda run: (run.spec.agent, run.spec.started))
+    real = Comparison(runs[0], runs[1]).page().deltas.rate
+    assert (real.value, real.tone) == (-50, "bad")
+    unjudged = Comparison(runs[2], runs[3]).page().deltas.rate
+    assert (unjudged.value, unjudged.tone) == (-10, "noise")
+
+
+def evidence(*scenarios: tuple[tuple[int, int], tuple[int, int]]) -> Evidence:
+    """Evidence from ((held, judged) before, (held, judged) after), one pair per scenario."""
+    return Evidence(tuple((Tally(*before), Tally(*after)) for before, after in scenarios))
+
+
+@pytest.mark.parametrize(
+    ("scenarios", "chance"),
+    [
+        ([((0, 1), (1, 1))] * 3, 0.25),  # three from fail to pass, one attempt each: 1 in 4
+        ([((3, 3), (0, 3))], 0.1),  # 3/3 to 0/3: 1 in 20 each way
+        ([((2, 3), (2, 3))], 1.0),  # no change
+        ([], 1.0),  # nothing in common
+        ([((0, 19), (1, 1))], 0.05),  # unequal attempts between the runs: 1 in 20
+        ([((0, 1), (1, 3)), ((0, 1), (2, 4))], 1.0),  # floats that should be equal count as equal
+    ],
+)
+def test_evidence_counts_the_chance_of_a_change_by_hand(scenarios: list, chance: float):
+    assert evidence(*scenarios).chance() == pytest.approx(chance)
+
+
+@pytest.mark.parametrize(
+    ("scenarios", "shows"),
+    [
+        ([((0, 19), (1, 1))], None),  # exactly 5%: not below it
+        ([((0, 1), (1, 1))] * 6, "better"),  # the same change over six: 1 in 32
+        ([((10, 40), (8, 10))], "better"),  # fewer attempts after, more of them passed
+        ([((20, 20), (10, 20))] + [((20, 20), (20, 20))] * 5, "worse"),  # many attempts
+        ([((1, 1), (0, 1))] + [((1, 1), (1, 1))] * 5, None),  # the same fall, one attempt
+    ],
+)
+def test_evidence_shows_a_change_only_when_the_attempts_support_it(scenarios: list, shows):
+    assert evidence(*scenarios).shows() == shows
 
 
 def test_other_tiles_are_coloured_by_direction(tmp_path):
