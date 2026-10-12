@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from convy.agent import Answer, Message, NoUsage, Usage
+from convy.agent import Answer, Message, NoUsage, Thinking, Usage
 from convy.bench import CONVY, Finished, Interrupted, RunJournal, RunSpec
 from convy.dialog import (
     Claim,
@@ -270,7 +270,26 @@ def test_a_run_without_verdicts_or_usage_reports_none(tmp_path):
     (attempt,) = scenario.attempts
     assert (attempt.input, attempt.output, attempt.tokens) == (None, None, None)
     assert (attempt.turns[0].input, attempt.turns[0].tokens) == (None, None)
+    assert (attempt.thinking_tokens, page.metrics.thinking_tokens) == (None, None)
     assert (attempt.passed, attempt.error) == (None, "judge down")
+
+
+def test_a_turn_shows_the_agent_thinking_and_its_tokens(tmp_path):
+    turns = (
+        Turn(Message("hi"), Answer("a", Usage(10, 30, 20), Thinking("plan")), 1.0),
+        Turn(Message("and?"), Answer("b", Usage(5, 10), Thinking("")), 1.0),  # empty: shows nothing
+        Turn(Message("ok"), Answer("c", thinking=Thinking("only text")), 1.0),  # no usage
+    )
+    journal(tmp_path, "bot", "1", 1, Outcome("a", 1, Transcript(turns), PASSED, "max_turns"))
+    page = Report(only(tmp_path)).page()
+    (attempt,) = page.scenarios[0].attempts
+    assert [(t.thinking, t.thinking_tokens) for t in attempt.turns] == [
+        ("plan", 20),
+        ("", 0),
+        ("only text", None),
+    ]
+    assert (attempt.output, attempt.thinking_tokens) == (40, 20)  # thinking is part of output
+    assert page.metrics.thinking_tokens == 20
 
 
 def test_a_claim_is_summed_up_over_the_attempts_the_judge_decided(tmp_path):

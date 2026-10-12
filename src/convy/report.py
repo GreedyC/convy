@@ -11,7 +11,7 @@ from typing import Literal
 import msgspec
 from msgspec import Struct
 
-from convy.agent import NoUsage, Usage
+from convy.agent import NoThinking, NoUsage, Thinking, Usage
 from convy.bench import Finished, Interrupted, Pair, RunFile, Running, RunSpec, Status
 from convy.dialog import (
     Claim,
@@ -156,6 +156,8 @@ class TurnView(Struct, frozen=True):
     input: int | None
     output: int | None
     tokens: int | None
+    thinking_tokens: int | None  # part of output
+    thinking: str  # "": the agent gave none
 
 
 class AttemptView(Struct, frozen=True):
@@ -170,6 +172,7 @@ class AttemptView(Struct, frozen=True):
     input: int | None
     output: int | None
     tokens: int | None
+    thinking_tokens: int | None
     turns: tuple[TurnView, ...]
 
 
@@ -213,6 +216,7 @@ class Metrics(Struct, frozen=True):
     input: float | None  # mean per attempt
     output: float | None
     tokens: float | None
+    thinking_tokens: float | None
     agent_errors: int
     model_errors: int
     errors: int
@@ -391,6 +395,7 @@ class Summary(Struct, frozen=True):
             input=self.average(a.input for a in attempts),
             output=self.average(a.output for a in attempts),
             tokens=self.average(a.tokens for a in attempts),
+            thinking_tokens=self.average(a.thinking_tokens for a in attempts),
             agent_errors=agent_errors,
             model_errors=model_errors,
             errors=agent_errors + model_errors,
@@ -469,6 +474,7 @@ class Summary(Struct, frozen=True):
             input=self.total(turn.input for turn in turns),
             output=self.total(turn.output for turn in turns),
             tokens=self.total(turn.tokens for turn in turns),
+            thinking_tokens=self.total(turn.thinking_tokens for turn in turns),
             turns=turns,
         )
 
@@ -487,15 +493,21 @@ class Summary(Struct, frozen=True):
 
     def turn(self, turn: Turn) -> TurnView:
         match turn.answer.usage:
-            case Usage(input=spent, output=produced):
-                tokens: tuple[int | None, int | None, int | None] = (
+            case Usage(input=spent, output=produced, thinking=thought):
+                tokens: tuple[int | None, int | None, int | None, int | None] = (
                     spent,
                     produced,
                     spent + produced,
+                    thought,
                 )
             case NoUsage():
-                tokens = (None, None, None)
-        return TurnView(turn.message.text, turn.answer.text, turn.seconds, *tokens)
+                tokens = (None, None, None, None)
+        match turn.answer.thinking:
+            case Thinking(text=text):
+                thinking = text
+            case NoThinking():
+                thinking = ""
+        return TurnView(turn.message.text, turn.answer.text, turn.seconds, *tokens, thinking)
 
     def total(self, counts: Iterable[int | None]) -> int | None:
         known = [count for count in counts if count is not None]

@@ -4,7 +4,15 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from convy.agent import AgentFailure, Answer, Conversation, Message, NoUsage, TimeLimited, Usage
+from convy.agent import (
+    AgentFailure,
+    Answer,
+    Conversation,
+    Message,
+    NoUsage,
+    TimeLimited,
+    Usage,
+)
 from convy.dialog import ChatJudge
 from convy.fakes import Echo, EchoConversation, FakeAgent, FakeModel
 from convy.model import Models
@@ -97,3 +105,9 @@ async def test_fake_agent_repeats_its_last_step_and_starts_over_per_conversation
 def test_fake_agent_needs_a_step():
     with pytest.raises(ValueError, match="at least one step"):
         FakeAgent()
+
+
+@pytest.mark.parametrize("thinking", [-1, 31])
+def test_thinking_tokens_are_part_of_the_output(thinking: int):
+    with pytest.raises(ValueError, match="thinking tokens must be from 0 to the output's 30"):
+        Usage(10, 30, thinking)

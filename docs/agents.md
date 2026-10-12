@@ -162,6 +162,45 @@ time mixes their tokens. Run such an agent with `--parallel 1`.
 If your agent does not report tokens, the report shows time and results without them. To get them,
 add them to the agent's answer, or read them from the model gateway the agent uses.
 
+## Thinking
+
+Some agents think before they answer. Give the thinking apart from the answer, so the simulated user
+and the judge read only what the agent said:
+
+```python
+return Answer(text, Usage(input=120, output=300, thinking=200), Thinking(thought))
+```
+
+`thinking` in `Usage` is the part of `output` spent on thinking. OpenAI and Anthropic report it that
+way, so pass their numbers as they are. If a provider counts thinking apart from the answer, as
+Gemini does, add the two: `output` is the answer's tokens plus the thinking's. Leave out what your
+agent does not report.
+
+convy does not guess where an agent keeps its thinking; your `answer` knows. An agent that sends it
+in a field of its own:
+
+```python
+    async def answer(self, message: Message) -> Answer:
+        response = await self.http.post("/chat", json={"text": message.text})
+        data = response.raise_for_status().json()["message"]
+        return Answer(data["content"], thinking=Thinking(data.get("reasoning_content") or ""))
+```
+
+An agent that puts it inside the text, as some open models do with `<think>…</think>`:
+
+```python
+    async def answer(self, message: Message) -> Answer:
+        response = await self.http.post("/chat", json={"text": message.text})
+        text = response.raise_for_status().json()["text"].strip()
+        thought, mark, said = text.partition("</think>")  # some models leave out the opening tag
+        if not mark:  # cut off while thinking, or no thinking at all
+            thought, said = (text, "") if text.startswith("<think>") else ("", text)
+        return Answer(said.strip(), thinking=Thinking(thought.removeprefix("<think>").strip()))
+```
+
+The simulated user never sees the thinking. A judge sees it only if it reviews it; see
+[the judge](judge.md#the-agents-thinking). The report shows it folded next to the answer.
+
 ## Corporate certificates
 
 An agent or a gateway behind a corporate certificate authority takes `Tls` in its endpoint. `ca` is

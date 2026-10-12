@@ -9,7 +9,7 @@ import msgspec
 import pytest
 from pydantic_settings import SettingsConfigDict
 
-from convy.agent import AgentFailure, Answer, Usage
+from convy.agent import AgentFailure, Answer, NoThinking, Usage
 from convy.bench import RunJournal, RunSpec
 from convy.dialog import ChatJudge, Claim, Failed, Graded, NoVerdict, Verdict
 from convy.env import Env
@@ -74,6 +74,36 @@ async def test_a_wrong_answer_fails_the_turn(answer: object):
     assert outcome.stop == "agent_failure"
     assert "the answer is not a valid Answer" in outcome.transcript.turns[-1].answer.text
     msgspec.json.decode(msgspec.json.encode(outcome), type=Outcome)  # the journal can read it
+
+
+class LikeUsage(msgspec.Struct, frozen=True, tag="usage"):
+    """The shape of `Usage` without its check, as an agent's own class might send it."""
+
+    input: int = 1
+    output: int = 2
+    thinking: int = 5
+
+
+@pytest.mark.parametrize("build", [lambda: Usage(1, 2, 5), LikeUsage])
+async def test_thinking_tokens_above_the_output_fail_the_turn_not_the_run(build):
+    class Talking:
+        async def answer(self, message: object) -> Answer:
+            return Answer("x", build())
+
+    class Agent:
+        @asynccontextmanager
+        async def conversation(self):
+            yield Talking()
+
+    outcome = await SCENARIO.outcome(Agent(), models("hi"), attempt=1)
+    assert outcome.stop == "agent_failure"
+    assert "thinking tokens must be from 0 to the output's 2" in str(outcome.verdict)
+
+
+def test_an_answer_written_before_thinking_reads_without_it():
+    old = b'{"text": "hi", "usage": {"type": "usage", "input": 1, "output": 2}}'
+    answer = msgspec.json.decode(old, type=Answer)
+    assert (answer.thinking, answer.usage) == (NoThinking(), Usage(1, 2, 0))
 
 
 async def test_an_agent_that_cannot_open_a_conversation_fails():

@@ -100,15 +100,19 @@ class FakeModel:
 class FakeJudge:
     """A judge that decides from a list: a step is the claims to return, or an exception to raise.
 
-    The list runs across all calls, and the last step repeats. Its `name` is `"fake"`.
+    The list runs across all calls, and the last step repeats. Its `name` is `"fake"`;
+    `reviews_agent_thinking` is `False` unless given.
     """
 
     name = "fake"
 
-    def __init__(self, *steps: tuple[Claim, ...] | ModelFailure):
+    def __init__(
+        self, *steps: tuple[Claim, ...] | ModelFailure, reviews_agent_thinking: bool = False
+    ):
         if not steps:
             raise ValueError("FakeJudge needs at least one step")
         self.steps = steps
+        self.reviews_agent_thinking = reviews_agent_thinking
         self.calls: list[tuple[Transcript, tuple[str | Graded, ...]]] = []
 
     async def decide(

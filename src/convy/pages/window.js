@@ -64,7 +64,11 @@ function attemptTiles(attempt) {
     el("div", {}, el("span", {className: "l"}, "Result"), el("span", {className: `v ${result}`}, icon(result), attempt.cut ? "Not trusted" : ATTEMPT[result]), el("span", {className: "s"}, STOPS[attempt.stop] ?? attempt.stop)),
     el("div", {}, el("span", {className: "l"}, "Answer time"), el("span", {className: "v"}, secs(attempt.seconds)), el("span", {className: "s"}, attempt.slowest == null ? "no answers" : `${plural(answers, "answer")} · slowest ${secs(attempt.slowest)}`)),
     el("div", {}, el("span", {className: "l"}, "Tokens"), el("span", {className: "v"}, count(attempt.tokens)),
-      el("span", {className: "s"}, attempt.input == null ? "not reported" : `${count(attempt.input)} in · ${count(attempt.output)} out`)));
+      el("span", {className: "s"}, attempt.input == null ? "not reported" : `${count(attempt.input)} in · ${count(attempt.output)} out${thought(attempt.thinking_tokens)}`)));
+}
+// The part of the output spent on thinking, or nothing when there was none.
+function thought(tokens) {
+  return tokens ? `, ${count(tokens)} thinking` : "";
 }
 // How sure the judge was of a decision, at the run's trust; nothing when the run's judge never says.
 function sure(claim, run) {
@@ -87,7 +91,8 @@ function dialogue(attempt) {
       el("div", {className: "bhead"}, el("span", {className: "who"}, "AGENT"),
         el("span", {className: "m"}, clock(), el("strong", {}, secs(t.seconds))),
         el("span", {className: "m"}, t.tokens == null ? el("span", {className: "muted"}, "tokens not reported")
-          : [el("strong", {}, count(t.tokens)), " tokens ", el("span", {className: "muted"}, `· ${count(t.input)} in · ${count(t.output)} out`)])),
+          : [el("strong", {}, count(t.tokens)), " tokens ", el("span", {className: "muted"}, `· ${count(t.input)} in · ${count(t.output)} out${thought(t.thinking_tokens)}`)])),
+      t.thinking && el("details", {className: "thinking"}, el("summary", {}, "Thinking"), el("div", {}, t.thinking)),
       markdown(t.agent))),
   ]);
 }

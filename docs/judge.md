@@ -16,6 +16,21 @@ models = Models(
 
 `ChatJudge` asks a chat model, with a prompt of convy's. It does not say how sure it is.
 
+## The agent's thinking
+
+An agent may give its thinking apart from its answer ([see how](agents.md#thinking)). A judge gets
+it only if it reviews it:
+
+```python
+judge = ChatJudge(OpenAiModel(gateway, "gpt-4.1-mini"), reviews_agent_thinking=True)
+```
+
+Then the judge's model reads the agent's thinking before each answer, marked as thinking the user
+did not see, and judges what the agent said unless a claim is about what it thought, such as "the
+agent checked the refund rules". Its name ends with `+ agent thinking`, so `convy resume` and
+`convy compare` tell it from the judge without the thinking. By default `reviews_agent_thinking` is
+`False`, and the judge gets only what the agent said.
+
 ## How sure the judge is
 
 A judge may say, for each decision, how sure it is: a number from 0 to 1. Run with `--trust` to
@@ -37,9 +52,9 @@ your own on some dialogues.
 
 ## Your own judge
 
-A judge is any object with a `name` and `decide`. `decide` gets the dialogue and the claims, and
-returns one `Claim` per claim, in their order. This one asks a service that scores how likely a
-statement is true of a text:
+A judge is any object with a `name`, `reviews_agent_thinking` and `decide`. `decide` gets the
+dialogue and the claims, and returns one `Claim` per claim, in their order. This one asks a service
+that scores how likely a statement is true of a text:
 
 ```python
 import httpx2
@@ -49,6 +64,7 @@ from convy import Claim, Confidence, Graded, ModelFailure, Transcript
 
 class Classifier:
     name = "claim-classifier"
+    reviews_agent_thinking = False
 
     async def decide(
         self, transcript: Transcript, claims: tuple[str | Graded, ...]
@@ -78,6 +94,9 @@ Put it in `models.py`, or in a module `models.py` imports, and set `judge=Classi
   folder and the report, so keep keys out of it.
 - An answer with the wrong number of claims, a confidence outside 0 to 1, a grade the claim does not
   have, or a `pass` that does not match the grade also leaves the attempt without a verdict.
+- `reviews_agent_thinking` says whether `decide` gets the agent's thinking. When it is `False`,
+  every answer in the transcript has `NoThinking()`, so the judge cannot see the thinking even by
+  mistake. If the setting can change your judge's verdicts, change `name` with it.
 - `name` is saved with the run. `convy resume` refuses to go on if it changes.
 - Test a judge that calls a service with `httpx2.MockTransport`. Test a judge built on a model
   with the fakes in `convy.fakes`, e.g. `ChatJudge(FakeModel(...))`.

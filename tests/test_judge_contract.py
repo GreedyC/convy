@@ -31,3 +31,8 @@ async def test_decide_gives_one_claim_per_claim_in_order_and_name_is_set(make):
 async def test_failure_is_model_failure(make):
     with pytest.raises(ModelFailure):
         await make().decide(Transcript(), CLAIMS)
+
+
+@pytest.mark.parametrize("make", JUDGES.values(), ids=JUDGES)
+def test_a_judge_says_whether_it_reviews_the_agent_thinking(make):
+    assert make().reviews_agent_thinking is False

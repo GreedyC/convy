@@ -15,21 +15,40 @@ class Message(Struct, frozen=True):
 
 
 class Usage(Struct, frozen=True, tag="usage"):
-    """Tokens the agent spent on one answer."""
+    """Tokens the agent spent on one answer; `thinking` is the part of `output` it spent on
+    thinking."""
 
     input: int
     output: int
+    thinking: int = 0
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.thinking <= self.output:
+            raise ValueError(
+                f"thinking tokens must be from 0 to the output's {self.output}, got {self.thinking}"
+            )
 
 
 class NoUsage(Struct, frozen=True, tag="no_usage"):
     """The agent did not report the tokens it spent."""
 
 
+class Thinking(Struct, frozen=True, tag="thinking"):
+    """What the agent thought before it answered, kept apart from the answer."""
+
+    text: str
+
+
+class NoThinking(Struct, frozen=True, tag="no_thinking"):
+    """The agent did not give its thinking."""
+
+
 class Answer(Struct, frozen=True):
-    """The agent's answer to a message."""
+    """The agent's answer to a message: `text` is what it said, `thinking` what it thought."""
 
     text: str
     usage: Usage | NoUsage = NoUsage()
+    thinking: Thinking | NoThinking = NoThinking()
 
 
 class AgentFailure(Exception):
