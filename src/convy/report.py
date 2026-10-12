@@ -21,7 +21,9 @@ from convy.dialog import (
     Graded,
     NoConfidence,
     NoGrade,
+    NoReason,
     NoVerdict,
+    Reason,
     Turn,
     Verdict,
 )
@@ -30,15 +32,38 @@ from convy.scenario import Outcome, Scenario, Stop
 UNREADABLE = (msgspec.DecodeError, OSError)  # ValidationError is a DecodeError
 
 
+class FormatTwo(Struct, frozen=True):
+    """An attempt line of format 2, where a claim's reason was a string, read as format 3."""
+
+    line: bytes
+
+    def outcome(self) -> Outcome:
+        data = msgspec.json.decode(self.line)
+        match data:
+            case {"verdict": {"type": "verdict", "claims": list() as claims}}:
+                data["verdict"]["claims"] = [self.claim(claim) for claim in claims]
+        return msgspec.convert(data, Outcome)
+
+    def claim(self, claim: object) -> object:
+        match claim:
+            case {"reason": str() as text}:
+                reason = {"type": "reason", "text": text} if text.strip() else {"type": "no_reason"}
+                return {**claim, "reason": reason}
+            case _:
+                return claim
+
+
 class Run(Struct, frozen=True):
     """A run's folder read back: where it is under the results directory, its specification and
-    status, the outcomes it could read, and how many lines it could not."""
+    status, the outcomes it could read, how many lines it could not, and the format it was written
+    in."""
 
     path: Path
     spec: RunSpec
     status: Status
     outcomes: tuple[Outcome, ...]
     unreadable: int = 0
+    format: Literal[2, 3] = 3
 
     def done(self) -> frozenset[Pair]:
         """The attempts the run has recorded."""
@@ -88,7 +113,11 @@ class Runs(Struct, frozen=True):
         unreadable = 0
         for line in lines:
             try:
-                outcome = msgspec.json.decode(line, type=Outcome)
+                outcome = (
+                    msgspec.json.decode(line, type=Outcome)
+                    if file.format == 3
+                    else FormatTwo(line).outcome()
+                )
             except UNREADABLE:  # a line cut short by a crash, say
                 unreadable += 1
                 continue
@@ -108,6 +137,7 @@ class Runs(Struct, frozen=True):
             file.status,
             tuple(outcomes.values()),
             unreadable,
+            file.format,
         )
 
 
@@ -489,7 +519,12 @@ class Summary(Struct, frozen=True):
                 grade: str | None = value
             case NoGrade():
                 grade = None
-        return ClaimView(claim.passed, claim.reason, sure, claim.trusted(trust), grade)
+        match claim.reason:
+            case Reason(text=text):
+                reason = text
+            case NoReason():
+                reason = ""
+        return ClaimView(claim.passed, reason, sure, claim.trusted(trust), grade)
 
     def turn(self, turn: Turn) -> TurnView:
         match turn.answer.usage:
