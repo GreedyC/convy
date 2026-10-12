@@ -34,7 +34,7 @@ from convy.dialog import ChatJudge, Failed, NoVerdict, Verdict
 from convy.fakes import FakeModel, MemoryJournal
 from convy.model import Models
 from convy.project import Project, ProjectAgent
-from convy.report import Runs
+from convy.report import Runs, Summary
 from convy.scenario import Matching, Outcome, Scenario
 
 SMOKE = Scenario(
@@ -158,9 +158,15 @@ class RunCommand(BaseModel):
         le=1,
         description="cut out the judge's decisions it is less sure of than this, from 0 to 1",
     )
+    fail_under: float | None = Field(
+        None, ge=0, le=1, description="exit with 3 when a pass rate is below this, from 0 to 1"
+    )
     smoke: bool = Field(False, description="check the connection to the agent; no models called")
 
     def cli_cmd(self) -> None:
+        if self.smoke and self.fail_under is not None:
+            print("error: --fail-under needs a run; --smoke plays none", file=sys.stderr)
+            raise SystemExit(2)
         project = Project(Path())
         try:
             agents = [project.agent(name) for name in self.agents]
@@ -181,13 +187,29 @@ class RunCommand(BaseModel):
             else:
                 journal = self.journal(project, bench, loaded, files)
                 outcomes = Recorded(project, journal).outcomes(bench, agent)
-                played.append(journal.spec)
+                played.append(journal)
             failed |= any(outcome.failed() for outcome in outcomes)
+        below = False
         if not self.smoke:
             Rebuilt(project).show()
-            for spec in played:
-                print(f"report: {project.report_page(spec)}")
-        raise SystemExit(int(failed))
+            for journal in played:
+                print(f"report: {project.report_page(journal.spec)}")
+                if self.fail_under is not None:
+                    below |= self.below(self.fail_under, project, journal)
+        raise SystemExit(1 if failed else 3 if below else 0)
+
+    def below(self, bar: float, project: Project, journal: RunJournal) -> bool:
+        """Whether the run's pass rate is below the bar, saying so; no judged attempt is below."""
+        summary = Summary(Runs(project.results()).read(journal.folder()))
+        metrics = summary.metrics(summary.scenarios().values())
+        low = metrics.rate is None or metrics.rate < bar
+        seen = (
+            "no attempt judged"
+            if metrics.rate is None
+            else f"pass rate {metrics.passed} of {metrics.judged} ({metrics.rate:.1%})"
+        )
+        print(f"{journal.spec.agent}: {seen}, {'below' if low else 'at least'} {bar * 100:.10g}%")
+        return low
 
     def bench(self, project: Project) -> Bench:
         """A bench for one agent, with models of its own: a fake model's replies run on across its
@@ -310,6 +332,7 @@ class Convy(BaseSettings):
         cli_kebab_case=True,
         cli_implicit_flags=True,
         cli_enforce_required=True,
+        cli_hide_none_type=True,
     )
     init: CliSubCommand[InitCommand] = Field(description="create a project with examples")
     run: CliSubCommand[RunCommand] = Field(description="play scenarios against agents")
