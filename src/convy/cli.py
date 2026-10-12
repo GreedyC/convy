@@ -6,7 +6,6 @@ import io
 import secrets
 import sys
 from datetime import datetime
-from importlib.metadata import version
 from pathlib import Path
 
 from msgspec import Struct
@@ -20,7 +19,17 @@ from pydantic_settings import (
 )
 
 from convy.agent import Agent, NoUsage, TimeLimited, Usage
-from convy.bench import Bench, Files, Finished, Journal, Pair, RunInUse, RunJournal, RunSpec
+from convy.bench import (
+    CONVY,
+    Bench,
+    Files,
+    Finished,
+    Journal,
+    Pair,
+    RunInUse,
+    RunJournal,
+    RunSpec,
+)
 from convy.dialog import ChatJudge, Failed, NoVerdict, Verdict
 from convy.fakes import FakeModel, MemoryJournal
 from convy.model import Models
@@ -207,7 +216,6 @@ class RunCommand(BaseModel):
             trust=self.trust,
             scenarios=bench.scenarios,
             started=started,
-            convy=version("convy"),
             files=files,
         )
         journal = RunJournal(project.results(), spec)
@@ -247,11 +255,11 @@ class ResumeCommand(BaseModel):
             match run.status:
                 case Finished():
                     raise ValueError(f"run {spec.id} is finished; there is nothing to resume")
-            loaded = project.agent(spec.agent)
+            if changes := spec.code_changes(project.files(spec.agent), CONVY):
+                raise ValueError(f"run {self.run} cannot resume: {'; '.join(changes)}")
+            loaded = project.agent(spec.agent)  # the project's code runs only after the check above
             models = project.models()
-            files = project.files(spec.agent)
-            changes = spec.changes(loaded.version, models.user.name, models.judge.name, files)
-            if changes:
+            if changes := spec.label_changes(loaded.version, models.user.name, models.judge.name):
                 raise ValueError(f"run {self.run} cannot resume: {'; '.join(changes)}")
         except ValidationError as error:  # settings in the project's files
             Invalid(error).show()

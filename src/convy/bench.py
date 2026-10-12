@@ -6,6 +6,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from importlib import metadata
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -22,6 +23,8 @@ else:
     import fcntl
 
 type Pair = tuple[str, int]  # a scenario's id and an attempt's number
+
+CONVY = metadata.version("convy")  # the installed convy, which a new run records
 
 
 class Files(Struct, frozen=True):
@@ -44,7 +47,7 @@ class RunSpec(Struct, frozen=True):
     turn_timeout: float
     scenarios: tuple[Scenario, ...]
     started: datetime
-    convy: str = ""
+    convy: str = CONVY
     files: Files = Files()
     trust: float = 0.0  # decisions the judge is less sure of are cut out; 0 cuts nothing
 
@@ -52,15 +55,29 @@ class RunSpec(Struct, frozen=True):
         if not 0 <= self.trust <= 1:
             raise ValueError(f"trust must be from 0 to 1, got {self.trust}")
 
-    def changes(self, version: str, user: str, judge: str, files: Files) -> tuple[str, ...]:
-        """What differs now from what the run started with: each a reason it cannot continue
-        unchanged. A change in a module the agent imports, or in the service behind it, does not
-        show here."""
+    def code_changes(self, files: Files, convy: str) -> tuple[str, ...]:
+        """How the code that plays the run differs from the code it started with: the agent's
+        file, `models.py` and convy itself, each a reason the run cannot continue unchanged. Known
+        without loading the project, so it is checked first. A change in a module these files
+        import, such as `gateway.py`, or in the service behind the agent, does not show here."""
         found = []
         if files.agent != self.files.agent:
             found.append(f"agents/{self.agent}.py changed since the run started")
         if files.models != self.files.models:
             found.append("models.py changed since the run started")
+        if convy != self.convy:
+            found.append(
+                f"convy is {convy}, the run started on {self.convy}"
+                if self.convy
+                else f"convy is {convy}, the run does not say which convy started it"
+            )
+        return tuple(found)
+
+    def label_changes(self, version: str, user: str, judge: str) -> tuple[str, ...]:
+        """How the labels the project's code gives itself differ from the run's: the agent's
+        `version` and the models' names, each a reason the run cannot continue unchanged. Known
+        only once the agent and `models.py` are loaded, so `code_changes` comes first."""
+        found = []
         if version != self.version:
             found.append(f"the agent's version is {version!r}, the run has {self.version!r}")
         if user != self.user:
