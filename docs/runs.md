@@ -67,7 +67,8 @@ Delete its folder and run `convy report`.
   attempt it played. This wins over `3`: a run with errors does not measure quality.
 - `2`: nothing ran: the project could not be loaded, the arguments are wrong, or the run cannot be
   resumed, also when another process is playing it.
-- `3`: with `--fail-under`, a pass rate is below it, or no attempt was judged.
+- `3`: with `--fail-under`, a pass rate is below it, or no attempt was judged. With
+  `--fail-on-regression`, the pass rate tile is red, or no scenario can be compared.
 - `130`: the run was stopped with Ctrl+C. `convy resume` continues it.
 
 Failed scenarios do not change the exit code unless you give `--fail-under`. `convy compare` exits
@@ -83,7 +84,7 @@ uv run convy run support_bot --fail-under 0.9
 convy prints each agent's pass rate against the bar, such as
 `support_bot: pass rate 449 of 500 (89.8%), below 90%`.
 
-## Fail CI when a scenario regresses
+## Fail CI when the pass rate regresses
 
 Compare a baseline run with the new build:
 
@@ -91,16 +92,6 @@ Compare a baseline run with the new build:
 uv run convy compare <before> <after> --fail-on-regression
 ```
 
-The page is written before the verdict. The command exits with `3` and lists the
-scenario ids if any unchanged scenario's observed pass rate is lower than before.
-Improvements elsewhere do not cancel a regression. Equal or improved pass rates
-exit with `0`. A scenario added, removed, edited or without a judged attempt in
-either run is not compared; if none can be compared, the command explains why
-and exits with `2` rather than calling the build good.
-
-This uses the same scenario groups as the comparison page. It is a strict check
-of observed rates, not a claim that a difference is statistically significant.
-Use enough attempts and the same models/settings for a meaningful baseline;
-model and convy version differences remain visible on the page.
-
-Without the flag, comparison keeps its existing exit codes.
+The page is written first; CI fails only when its pass rate tile is red, as explained in
+[Compare two runs](report.md#compare-two-runs), and scenarios with lower rates are listed for review.
+Use enough attempts and the same models and settings for a meaningful baseline.

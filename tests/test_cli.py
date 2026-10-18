@@ -43,9 +43,19 @@ def runs(project: Path, agent: str) -> list[Path]:
 
 
 def convy(*argv: str) -> int:
-    with pytest.raises(SystemExit) as exit:
+    try:
         main(list(argv))
-    return int(exit.value.code or 0)
+    except SystemExit as exit:
+        return int(exit.code or 0)
+    return 0
+
+
+def comparison_runs(project: Path, old_models: str, new_models: str, k: int = 10):
+    for i, models in enumerate((old_models, new_models)):
+        (project / "models.py").write_text(models)
+        with time_machine.travel(f"2026-10-13 10:00:0{i}+00:00", tick=False):
+            assert convy("run", "echo", "--scenarios", "clarify-*", "-k", str(k)) == 0
+    return tuple(folder.name.rpartition("_")[2] for folder in runs(project, "echo"))
 
 
 @pytest.fixture
@@ -528,11 +538,7 @@ def test_a_wrong_bar_runs_nothing(project: Path, capsys, argv: tuple[str, ...], 
 def test_compare_can_fail_ci_on_a_regression(
     project: Path, capsys, old_models: str, new_models: str, code: int
 ):
-    for i, models in enumerate((old_models, new_models)):
-        (project / "models.py").write_text(models)
-        with time_machine.travel(f"2026-10-13 10:00:0{i}+00:00", tick=False):
-            assert convy("run", "echo", "--scenarios", "clarify-*") == 0
-    before, after = (folder.name.rpartition("_")[2] for folder in runs(project, "echo"))
+    before, after = comparison_runs(project, old_models, new_models)
     capsys.readouterr()
     assert convy("compare", before, after, "--fail-on-regression") == code
     out = capsys.readouterr().out
@@ -541,32 +547,37 @@ def test_compare_can_fail_ci_on_a_regression(
     assert (project / "results" / "compare" / f"{before}-vs-{after}.html").is_file()
 
 
-def test_compare_still_succeeds_on_regression_without_the_flag(project: Path, capsys):
-    for i, models in enumerate((FAKE_MODELS, FAILING_MODELS)):
-        (project / "models.py").write_text(models)
-        with time_machine.travel(f"2026-10-13 10:00:0{i}+00:00", tick=False):
-            assert convy("run", "echo", "--scenarios", "clarify-*") == 0
-    before, after = (folder.name.rpartition("_")[2] for folder in runs(project, "echo"))
-    main(["compare", before, after])
+def test_compare_still_succeeds_on_regression_without_the_flag(project: Path):
+    before, after = comparison_runs(project, FAKE_MODELS, FAILING_MODELS)
+    assert convy("compare", before, after) == 0
 
 
-@pytest.mark.parametrize("new_models", [FAILING_MODELS, UNSURE_MODELS])
+def test_compare_lists_a_noisy_drop_without_failing_ci(project: Path, capsys):
+    before, after = comparison_runs(project, FAKE_MODELS, FAILING_MODELS, k=1)
+    capsys.readouterr()
+    assert convy("compare", before, after, "--fail-on-regression") == 0
+    assert "regressed: clarify-backup" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("new_models", "scenario_id", "options"),
+    [
+        (FAILING_MODELS, "changed-backup", ()),
+        (UNSURE_MODELS, "clarify-backup", ("--trust", "0.8")),
+    ],
+)
 def test_compare_refuses_a_ci_verdict_when_nothing_can_be_compared(
-    project: Path, capsys, new_models: str
+    project: Path, capsys, new_models: str, scenario_id: str, options: tuple[str, ...]
 ):
     (project / "models.py").write_text(FAKE_MODELS)
     with time_machine.travel("2026-10-13 10:00:00+00:00", tick=False):
         assert convy("run", "echo", "--scenarios", "clarify-*") == 0
     (project / "models.py").write_text(new_models)
-    if new_models == FAILING_MODELS:
-        scenario = project / "scenarios" / "clarify-backup.yaml"
-        scenario.write_text(scenario.read_text().replace("clarify-backup", "changed-backup"))
-        options = ("--scenarios", "changed-*")
-    else:
-        options = ("--scenarios", "clarify-*", "--trust", "0.8")
+    scenario = project / "scenarios" / "clarify-backup.yaml"
+    scenario.write_text(scenario.read_text().replace("clarify-backup", scenario_id))
     with time_machine.travel("2026-10-13 10:00:01+00:00", tick=False):
-        assert convy("run", "echo", *options) == 0
+        assert convy("run", "echo", "--scenarios", scenario_id, *options) == 0
     before, after = (folder.name.rpartition("_")[2] for folder in runs(project, "echo"))
     capsys.readouterr()
-    assert convy("compare", before, after, "--fail-on-regression") == 2
+    assert convy("compare", before, after, "--fail-on-regression") == 3
     assert "no unchanged scenario has a verdict in both runs" in capsys.readouterr().err
