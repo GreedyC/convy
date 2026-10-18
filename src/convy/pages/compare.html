@@ -52,11 +52,9 @@ function header() {
     themeButton());
 }
 
+const percentagePoints = v => v < 1 ? `${v.toFixed(1)} percentage points` : plural(Math.round(v), "percentage point");
+
 // A change: an arrow and a number in the metric's own unit; colour and "~" come from the data.
-function percentagePoints(value) {
-  const shown = value < 1 ? value.toFixed(1) : String(Math.round(value));
-  return `${shown} percentage ${Number(shown) === 1 ? "point" : "points"}`;
-}
 function change(delta, unit) {
   if (delta.tone === "none") return el("span", {className: "delta none"}, "—");
   if (delta.tone === "same") return el("span", {className: "delta same"}, "=");
