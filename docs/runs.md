@@ -92,6 +92,7 @@ Compare a baseline run with the new build:
 uv run convy compare <before> <after> --fail-on-regression
 ```
 
-The page is written first; CI fails only when its pass rate tile is red, as explained in
-[Compare two runs](report.md#compare-two-runs), and scenarios with lower rates are listed for review.
+The page is written first. The command prints the pass rate verdict and lists scenarios with lower
+rates, as explained in [Compare two runs](report.md#compare-two-runs). Both runs must be finished;
+an unfinished run or no comparable scenarios exits with 3.
 Use enough attempts and the same models and settings for a meaningful baseline.

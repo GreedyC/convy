@@ -313,7 +313,7 @@ class CompareCommand(BaseModel):
     before: CliPositionalArg[str] = Field(description="the run to compare with: id or random part")
     after: CliPositionalArg[str] = Field(description="the run that may have changed")
     fail_on_regression: bool = Field(
-        False, description="exit with 3 when the comparison pass rate tile is red"
+        False, description="exit with 3 when the pass rate got worse and the change is not chance"
     )
 
     def cli_cmd(self) -> None:
@@ -324,18 +324,27 @@ class CompareCommand(BaseModel):
         except ValueError as error:  # no such run, or several
             print(f"error: {error}", file=sys.stderr)
             raise SystemExit(2) from None
-        print(f"comparison: {project.compare(before, after)}")
+        page = Comparison(before, after).page()
+        print(f"comparison: {project.compare(before, after, page)}")
         if self.fail_on_regression:
-            page = Comparison(before, after).page()
+            if page.before.status != "finished" or page.after.status != "finished":
+                print("both runs must be finished to check for regression")
+                raise SystemExit(3)
             compared = [row for row in page.rows if row.group != "apart"]
             if not compared:
-                print("error: no unchanged scenario has a verdict in both runs", file=sys.stderr)
+                print("no scenario can be compared")
                 raise SystemExit(3)
+            verdict = {
+                "bad": "worse",
+                "good": "better",
+                "noise": "may be chance",
+                "same": "same",
+                "none": "not available",
+            }[page.deltas.rate.tone]
+            print(f"pass rate {page.was.rate:.0%} → {page.now.rate:.0%}: {verdict}")
             worse = [row.id for row in compared if row.group == "worse"]
             if worse:
-                print(f"regressed: {', '.join(worse)}")
-            else:
-                print("no scenario regressed")
+                print(f"lower pass rate: {', '.join(worse)}")
             raise SystemExit(3 if page.deltas.rate.tone == "bad" else 0)
 
 
